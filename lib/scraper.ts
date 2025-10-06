@@ -2,6 +2,7 @@ import { type Browser } from 'puppeteer';
 import * as cheerio from 'cheerio';
 import { Coin } from './types';
 import logger from './logger';
+import { sendAlert } from './alerter';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -599,6 +600,12 @@ export async function scrapeDexscreener(): Promise<Coin[]> {
     return coins;
   } catch (error: unknown) {
     logger.error('Failed to scrape Dexscreener:', error);
+    try {
+      const err = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      await sendAlert('Dexscreener scrape failed', err);
+    } catch (e) {
+      // ignore alerting failures
+    }
     if (error instanceof Error) {
       console.error('Detailed error:', {
         name: error.name,

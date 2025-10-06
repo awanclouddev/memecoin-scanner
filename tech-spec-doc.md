@@ -192,3 +192,8 @@ Notes:
 - The `data/` directory is mounted into the containers so scraped results are persisted on the host.
 - Use `restart: unless-stopped` in `docker-compose.yml` so the services restart automatically after reboots.
 
+Alerting and token rotation
+- To receive alerts when scrapes fail, set `ALERT_WEBHOOK_URL` in `.env.local` to a Slack/Discord/HTTP webhook. The scraper will POST a small JSON payload when a top-level error occurs.
+- Rotate Upstash tokens after testing: log into your Upstash console and regenerate the REST token. Update `.env.local` and your GitHub repository secrets accordingly.
+
+
