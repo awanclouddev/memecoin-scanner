@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-  "test": "vitest",
+    "test": "vitest",
+    "run-scraper": "tsx scripts/run-scraper.ts",
   "merge:parsed": "tsx scripts/merge-parsed-coins.ts",
   "populate-test": "tsx scripts/populate-test-data.ts"
   },

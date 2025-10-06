@@ -111,3 +111,55 @@ This endpoint provides the latest cached data to the end-user or client applicat
 
 - Tests added and passing locally.
 - Merge script available at `scripts/merge-parsed-coins.ts`.
+
+## How to enable scheduled / manual runs
+
+Follow these steps to activate the GitHub Actions workflows (scheduled and manual) and ensure the scraper runs automatically every 5 minutes.
+
+1) Commit & push the workflow files
+
+Make sure you run these commands from a machine/account that can create/update workflow files in the repository (your git user must be allowed to push workflows). If your git credential/token does not include the `workflow` scope, GitHub will reject commits that add or change files under `.github/workflows`.
+
+```bash
+git add .github/workflows/schedule-scrape.yml .github/workflows/manual-scrape.yml
+git commit -m "ci: add scheduled and manual scrape workflows"
+git push origin main
+```
+
+If the push fails with a permissions error for workflows, either:
+- push from an account with the `workflow` scope, or
+- create the workflow file manually in the GitHub UI (Repo → Actions → New workflow → "set up a workflow yourself").
+
+2) Add repository secrets
+
+The workflows expect the following repository secrets:
+- `SCRAPE_SECRET` — the secret token required by `/api/scrape`.
+- `MIN_PAIR_AGE_MINUTES` — optional (string number), e.g. `10`.
+
+Add them via the GitHub UI: Repository → Settings → Secrets and variables → Actions → New repository secret. Or use GitHub CLI:
+
+```bash
+gh secret set SCRAPE_SECRET --repo awanclouddev/memecoin-scanner --body 'your-secret-value'
+gh secret set MIN_PAIR_AGE_MINUTES --repo awanclouddev/memecoin-scanner --body '10'
+```
+
+3) Verify runs
+
+After the push and secret setup, open the Actions tab in the repository. You should see the scheduled workflow in the list and the manual workflow available for dispatch. You can manually trigger the `Manual Scrape (dispatch)` workflow from the Actions UI to test immediately.
+
+4) Fallback: run the cron script externally
+
+If you cannot enable GitHub Actions workflows, you can run scheduled scraping from any server or VM. Use the included runner `scripts/cron-scrape.js` which calls the `/api/scrape` endpoint on a running instance of this app.
+
+Example crontab (every 5 minutes):
+
+```bash
+*/5 * * * * cd /path/to/memecoin-scanner && \
+   /usr/bin/env SCRAPE_SECRET='your-secret' MIN_PAIR_AGE_MINUTES='10' /usr/local/bin/node ./scripts/cron-scrape.js >> /var/log/memecoin-scrape.log 2>&1
+```
+
+Notes
+- The scheduled workflow builds and starts the Next app in CI so there is no requirement for an externally hosted server. The build may increase run time and use Actions minutes.
+- The workflows reference repository secrets via `${{ secrets.SCRAPE_SECRET }}` and `${{ secrets.MIN_PAIR_AGE_MINUTES }}`. This is standard usage and will work when the workflow is pushed and executed by GitHub Actions.
+
+If you'd like, I can also add a short README snippet (or a dedicated CONTRIBUTING.md) that documents these steps for other contributors.
