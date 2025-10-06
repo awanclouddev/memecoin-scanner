@@ -6,8 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "vitest",
-    "populate-test": "tsx scripts/populate-test-data.ts"
+  "test": "vitest",
+  "merge:parsed": "tsx scripts/merge-parsed-coins.ts",
+  "populate-test": "tsx scripts/populate-test-data.ts"
   },
   "dependencies": {
     "@upstash/ratelimit": "^2.0.6",
