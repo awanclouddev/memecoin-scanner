@@ -6,6 +6,8 @@ services:
       - "3000:3000"
     env_file:
       - .env.local
+    environment:
+      - REMOTE_CHROME=ws://chrome:3000
     volumes:
       - ./data:/app/data
     restart: unless-stopped
@@ -15,6 +17,14 @@ services:
     command: npm run start-daemon
     env_file:
       - .env.local
+    environment:
+      - REMOTE_CHROME=ws://chrome:3000
     volumes:
       - ./data:/app/data
+    restart: unless-stopped
+
+  chrome:
+    image: browserless/chrome:latest
+    ports:
+      - "3000:3000"
     restart: unless-stopped
