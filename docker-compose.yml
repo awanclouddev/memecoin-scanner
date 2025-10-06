@@ -1,0 +1,20 @@
+version: '3.8'
+services:
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env.local
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
+  daemon:
+    build: .
+    command: npm run start-daemon
+    env_file:
+      - .env.local
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

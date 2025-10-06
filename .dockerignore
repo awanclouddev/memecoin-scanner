@@ -1,0 +1,12 @@
+node_modules
+.next
+data/debug-*
+debug-screenshot.png
+.git
+.gitignore
+.env.local
+tmp
+dist
+coverage
+logs
+**/*.log

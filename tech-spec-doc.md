@@ -163,3 +163,32 @@ Notes
 - The workflows reference repository secrets via `${{ secrets.SCRAPE_SECRET }}` and `${{ secrets.MIN_PAIR_AGE_MINUTES }}`. This is standard usage and will work when the workflow is pushed and executed by GitHub Actions.
 
 If you'd like, I can also add a short README snippet (or a dedicated CONTRIBUTING.md) that documents these steps for other contributors.
+
+## Running with Docker (recommended for local 24/7)
+
+The project includes a Dockerfile and docker-compose configuration that runs the Next app and the scraping daemon as two services. This is a convenient way to run the scanner 24/7 on a local machine or a small VPS.
+
+1) Build and start the services (reads `.env.local`):
+
+```bash
+docker-compose up --build -d
+```
+
+2) Check logs:
+
+```bash
+docker-compose logs -f web
+docker-compose logs -f daemon
+```
+
+3) Stop:
+
+```bash
+docker-compose down
+```
+
+Notes:
+- Ensure `.env.local` contains `SCRAPE_SECRET`, `UPSTASH_REDIS_REST_URL`, and `UPSTASH_REDIS_REST_TOKEN` before starting.
+- The `data/` directory is mounted into the containers so scraped results are persisted on the host.
+- Use `restart: unless-stopped` in `docker-compose.yml` so the services restart automatically after reboots.
+
