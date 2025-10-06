@@ -141,8 +141,12 @@ async function getPageContent(): Promise<string | Coin[]> {
     const userAgent = getRandomUserAgent();
     
     logger.info('Launching browser');
-    browser = await puppeteer.launch({
-      args: [
+    // Respect environment variables for headless and proxy
+    const headlessEnv = process.env.HEADLESS || 'false';
+    const headless = headlessEnv === 'true' || headlessEnv === '1';
+    const proxy = process.env.HTTP_PROXY || process.env.http_proxy || '';
+
+    const launchArgs = [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--window-size=1920x1080',
@@ -152,8 +156,15 @@ async function getPageContent(): Promise<string | Coin[]> {
         '--disable-web-security',
         '--disable-features=IsolateOrigins',
         '--disable-site-isolation-trials'
-      ],
-      headless: false
+      ];
+
+    if (proxy) {
+      launchArgs.push(`--proxy-server=${proxy}`);
+    }
+
+    browser = await puppeteer.launch({
+      args: launchArgs,
+      headless: headless
     });
 
     const page = await browser!.newPage();
@@ -251,26 +262,28 @@ async function getPageContent(): Promise<string | Coin[]> {
       // Normalize numeric fields and persist both raw and normalized data + artifacts
       const normalized = normalizeCoins(jsData as any[]);
       try {
-        await fs.mkdir(path.join(process.cwd(), 'data'), { recursive: true });
-        await fs.writeFile(path.join(process.cwd(), 'data', 'debug-js-extracted-raw.json'), JSON.stringify(jsData, null, 2), 'utf-8');
-        await fs.writeFile(path.join(process.cwd(), 'data', 'debug-js-extracted.json'), JSON.stringify(normalized, null, 2), 'utf-8');
+        if (process.env.DEBUG_SCRAPER === '1') {
+          await fs.mkdir(path.join(process.cwd(), 'data'), { recursive: true });
+          await fs.writeFile(path.join(process.cwd(), 'data', 'debug-js-extracted-raw.json'), JSON.stringify(jsData, null, 2), 'utf-8');
+          await fs.writeFile(path.join(process.cwd(), 'data', 'debug-js-extracted.json'), JSON.stringify(normalized, null, 2), 'utf-8');
 
-        // capture first N raw anchor rows innerHTML for debugging
-        try {
-          const rawRows: string[] = await page.$$eval('a.ds-dex-table-row', (els: any) => els.slice(0, 10).map((e: any) => e.innerHTML));
-          await fs.writeFile(path.join(process.cwd(), 'data', 'debug-raw-rows.json'), JSON.stringify(rawRows, null, 2), 'utf-8');
-        } catch (e) {
-          // non-fatal
+          // capture first N raw anchor rows innerHTML for debugging
+          try {
+            const rawRows: string[] = await page.$$eval('a.ds-dex-table-row', (els: any) => els.slice(0, 10).map((e: any) => e.innerHTML));
+            await fs.writeFile(path.join(process.cwd(), 'data', 'debug-raw-rows.json'), JSON.stringify(rawRows, null, 2), 'utf-8');
+          } catch (e) {
+            // non-fatal
+          }
+
+          // screenshot and HTML
+          try {
+            await page.screenshot({ path: (path.join(process.cwd(), 'data', 'debug-screenshot.png') as `${string}.png`) });
+          } catch (e) {}
+          try {
+            const content = await page.content();
+            await fs.writeFile(path.join(process.cwd(), 'data', 'debug-page-content.html'), content, 'utf-8');
+          } catch (e) {}
         }
-
-        // screenshot and HTML
-        try {
-          await page.screenshot({ path: (path.join(process.cwd(), 'data', 'debug-screenshot.png') as `${string}.png`) });
-        } catch (e) {}
-        try {
-          const content = await page.content();
-          await fs.writeFile(path.join(process.cwd(), 'data', 'debug-page-content.html'), content, 'utf-8');
-        } catch (e) {}
       } catch (e) {
         logger.error('Failed to write debug-js-extracted files', e);
       }
