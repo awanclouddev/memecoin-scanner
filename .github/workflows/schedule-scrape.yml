@@ -1,0 +1,25 @@
+name: Scheduled Scrape
+
+on:
+  schedule:
+    - cron: '*/5 * * * *' # every 5 minutes
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run scraper (direct)
+        env:
+          SCRAPE_SECRET: ${{ secrets.SCRAPE_SECRET }}
+          MIN_PAIR_AGE_MINUTES: ${{ secrets.MIN_PAIR_AGE_MINUTES }}
+        run: |
+          npm run run-scraper
