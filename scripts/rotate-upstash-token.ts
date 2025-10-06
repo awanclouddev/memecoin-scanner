@@ -1,4 +1,3 @@
-import fetch from 'node-fetch';
 import readline from 'readline';
 
 // This is a helper to remind and optionally call Upstash to rotate tokens.
