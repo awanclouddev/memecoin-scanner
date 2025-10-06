@@ -1,0 +1,262 @@
+// @ts-nocheck - to be fixed
+import { type Browser } from 'puppeteer';
+import * as cheerio from 'cheerio';
+import { Coin } from './types';
+import logger from './logger';
+
+let puppeteer: any;
+let StealthPlugin: any;
+
+async function initPuppeteer() {
+  if (!puppeteer) {
+    puppeteer = (await import('puppeteer-extra')).default;
+    StealthPlugin = (await import('puppeteer-extra-plugin-stealth')).default;
+    puppeteer.use(StealthPlugin());
+  }
+  return puppeteer;
+}
+
+const TARGET_URL = 'https://dexscreener.com/solana?rankBy=trendingScoreM5&order=desc&minLiq=10000&minMarketCap=10000&maxMarketCap=250000&min24HVol=50000&profile=1';
+
+const USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Safari/605.1.15',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+];
+
+function getRandomUserAgent(): string {
+  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+}
+
+async function retry<T>(fn: () => Promise<T>, maxAttempts: number = 3, delay: number = 1000): Promise<T> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (attempt === maxAttempts) throw error;
+      await new Promise(resolve => setTimeout(resolve, delay * attempt));
+    }
+  }
+  throw new Error('Max retry attempts reached');
+}
+
+export function parseNumber(text: string): number {
+  if (!text) return 0;
+  const cleaned = text.replace(/[$,\s%]/g, '').replace(/k$/i, '000').replace(/m$/i, '000000');
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function randomMove(page: any): Promise<void> {
+  const x = Math.floor(Math.random() * 800);
+  const y = Math.floor(Math.random() * 600);
+  await page.mouse.move(x, y);
+  await sleep(Math.random() * 200);
+}
+
+async function simulateHumanBehavior(page: any): Promise<void> {
+  // Random mouse movements
+  for (let i = 0; i < 5; i++) {
+    await randomMove(page);
+  }
+  
+  // Random scrolling
+  await page.evaluate(() => {
+    window.scrollTo(0, Math.random() * 500);
+  });
+  await sleep(1000);
+}
+
+async function getPageContent(): Promise<string> {
+  let browser: Browser | null = null;
+  
+  try {
+    const puppeteer = await initPuppeteer();
+    const userAgent = getRandomUserAgent();
+    
+    logger.info('Launching browser');
+    browser = await puppeteer.launch({
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--window-size=1920x1080',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-features=site-isolation-trial-command-line',
+        '--disable-web-security',
+        '--disable-features=IsolateOrigins',
+        '--disable-site-isolation-trials'
+      ],
+      headless: 'new'
+    });
+
+    const page = await browser!.newPage();
+    await page.setUserAgent(userAgent);
+    await page.setViewport({ width: 1920, height: 1080 });
+
+    // Randomize timezone and locale
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+      Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' });
+      Object.defineProperty(navigator, 'language', { get: () => 'en-US' });
+    });
+
+    // Set extra headers to appear more like a real browser
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Connection': 'keep-alive',
+      'Upgrade-Insecure-Requests': '1',
+      'Cache-Control': 'no-cache',
+      'Sec-Ch-Ua': '"Chromium";v="119", "Not?A_Brand";v="24"',
+      'Sec-Ch-Ua-Mobile': '?0',
+      'Sec-Ch-Ua-Platform': '"macOS"',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-User': '?1'
+    });
+    
+    logger.info('Navigating to target URL');
+    await page.goto(TARGET_URL, { 
+      waitUntil: 'networkidle0',
+      timeout: 60000
+    });
+    
+    logger.info('Simulating human behavior');
+    await simulateHumanBehavior(page);
+    
+    // Check for Cloudflare or other bot detection
+    const cloudflareDetected = await page.evaluate(() => {
+      return document.body.textContent?.includes('Cloudflare') || false;
+    });
+    
+    if (cloudflareDetected) {
+      logger.info('Cloudflare detected, waiting longer');
+      await sleep(10000);
+    }
+
+    await sleep(5000);
+    
+    logger.info('Checking page content');
+    let content = await page.content();
+    
+    // If we don't find any content, try waiting and scrolling more
+    if (!content.includes('div role="grid"') && !content.includes('table')) {
+      logger.info('Initial content empty, trying alternate strategy');
+      await page.evaluate(() => {
+        window.scrollTo(0, document.body.scrollHeight / 2);
+      });
+      await sleep(3000);
+      await page.evaluate(() => {
+        window.scrollTo(0, document.body.scrollHeight);
+      });
+      await sleep(2000);
+      content = await page.content();
+    }
+    
+    await browser!.close();
+    return content;
+  } catch (error) {
+    if (browser) await browser.close();
+    throw error;
+  }
+}
+
+function extractCoinData($: cheerio.CheerioAPI): Coin[] {
+  const coins: Coin[] = [];
+  const selectors = [
+    'div[role="grid"] > div[role="row"]',
+    'table > tr',
+    'table > tbody > tr',
+    '.grid-rows > div'
+  ];
+
+  logger.info('Trying to find coin data');
+  
+  for (const selector of selectors) {
+    $(selector).each((_, row) => {
+      try {
+        const $row = $(row);
+        const cells = $row.find('div[role="cell"], td');
+        if (cells.length < 8) return; // Skip header or invalid rows
+
+        const symbol = $(cells[1]).text().trim();
+        if (!symbol) return; // Skip empty rows
+
+        const name = $(cells[2]).text().trim();
+        const price = parseNumber($(cells[3]).text());
+        const marketCap = parseNumber($(cells[4]).text());
+        const liquidity = parseNumber($(cells[5]).text());
+        const volume24h = parseNumber($(cells[6]).text());
+        const price24h = parseNumber($(cells[7]).text());
+        const price1h = cells.length > 8 ? parseNumber($(cells[8]).text()) : 0;
+        const volume24hTrend = cells.length > 9 ? parseNumber($(cells[9]).text()) : 0;
+
+        coins.push({
+          symbol,
+          name,
+          price,
+          marketCap,
+          liquidity,
+          volume24h,
+          price24h,
+          price1h,
+          volume24hTrend,
+          updatedAt: new Date().toISOString()
+        });
+      } catch (error) {
+        logger.error('Error parsing row:', error);
+        // Continue to next row
+      }
+    });
+
+    // If we found any coins using this selector, break the loop
+    if (coins.length > 0) {
+      logger.info(`Found ${coins.length} coins using selector: ${selector}`);
+      break;
+    }
+  }
+
+  return coins;
+    
+    coins.push({
+      symbol,
+      name,
+      price,
+      marketCap,
+      liquidity,
+      volume24h,
+      price24h,
+      price1h,
+      volume24hTrend,
+      updatedAt: new Date().toISOString()
+    });
+  });
+
+  return coins;
+}
+
+export async function scrapeDexscreener(): Promise<Coin[]> {
+  logger.info('Starting Dexscreener scrape');
+  
+  try {
+    const html = await retry(() => getPageContent(), 3, 5000);
+    const $ = cheerio.load(html);
+    return extractCoinData($);
+  } catch (error) {
+    logger.error('Failed to scrape Dexscreener:', error);
+    console.error('Detailed error:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    });
+    throw error;
+  }
+}

@@ -1,0 +1,193 @@
+import { type Browser } from 'puppeteer';
+import * as cheerio from 'cheerio';
+import { Coin } from './types';
+import logger from './logger';
+
+let puppeteer: any;
+let StealthPlugin: any;
+
+async function initPuppeteer() {
+  if (!puppeteer) {
+    puppeteer = (await import('puppeteer-extra')).default;
+    StealthPlugin = (await import('puppeteer-extra-plugin-stealth')).default;
+    puppeteer.use(StealthPlugin());
+  }
+  return puppeteer;
+}
+
+const TARGET_URL = 'https://dexscreener.com/solana?rankBy=trendingScoreM5&order=desc&minLiq=10000&minMarketCap=10000&maxMarketCap=250000&min24HVol=50000&profile=1';
+
+const USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Safari/605.1.15',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+];
+
+function getRandomUserAgent(): string {
+  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+}
+
+async function retry<T>(fn: () => Promise<T>, maxAttempts: number = 3, delay: number = 1000): Promise<T> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (attempt === maxAttempts) throw error;
+      await new Promise(resolve => setTimeout(resolve, delay * attempt));
+    }
+  }
+  throw new Error('Max retry attempts reached');
+}
+
+export function parseNumber(text: string): number {
+  if (!text) return 0;
+  const cleaned = text.replace(/[$,\s%]/g, '').replace(/k$/i, '000').replace(/m$/i, '000000');
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? n : 0;
+}
+
+async function getPageContent(): Promise<string> {
+  let browser: Browser | null = null;
+  
+  try {
+    const puppeteer = await initPuppeteer();
+    const userAgent = getRandomUserAgent();
+    
+    logger.info('Launching browser');
+    browser = await puppeteer.launch({
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--window-size=1920x1080',
+        '--disable-dev-shm-usage',
+      ],
+      headless: 'new'
+    });
+
+    const page = await browser.newPage();
+    await page.setUserAgent(userAgent);
+    await page.setViewport({ width: 1920, height: 1080 });
+    
+    logger.info('Navigating to target URL');
+    await page.goto(TARGET_URL, { waitUntil: 'networkidle0', timeout: 30000 });
+    
+    // Wait for table to load
+    await page.waitForSelector('table', { timeout: 30000 });
+    
+    // Get page content
+    const content = await page.content();
+    
+    await browser.close();
+    return content;
+  } catch (error) {
+    if (browser) await browser.close();
+    throw error;
+  }
+}
+
+export async function scrapeDexscreener(): Promise<Coin[]> {
+  logger.info('Starting Dexscreener scrape');
+  
+  try {
+    const html = await retry(() => getPageContent(), 3, 5000);
+    if (!html) return [];
+          '--start-maximized',
+          '--disable-web-security',
+          '--disable-features=IsolateOrigins,site-per-process'
+        ],
+        headless: true
+      });
+
+      try {
+        const page = await browser.newPage();
+        await page.setUserAgent(USER_AGENT);
+        await page.setViewport({ width: 1920, height: 1080 });
+
+        logger.info(`Navigating to URL: ${TARGET_URL}`);
+        await page.goto(TARGET_URL, { waitUntil: 'networkidle0', timeout: 120000 });
+        logger.info('Page loaded');
+
+        logger.info('Waiting for table to be visible');
+        await page.waitForSelector('table tbody tr', { timeout: 60000 });
+        logger.info('Table is visible');
+        
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const content = await page.content();
+        logger.info(`Received HTML length: ${content?.length || 0} characters`);
+        return content;
+      } finally {
+        await browser.close();
+      }
+    };
+
+    html = await retry(scrape, 3, 5000);
+  } catch (err) {
+    logger.error('Puppeteer scraping failed', { error: (err as Error).message });
+    throw err;
+  }
+
+  if (!html) return [];
+
+  const $ = (cheerio as any).load(html);
+  const coins: Coin[] = [];
+
+  const rows = $('table tbody tr');
+  logger.info(`Found ${rows.length} rows in the table`);
+
+  if (rows.length > 0) {
+    rows.each(function (i: number, el: any) {
+      try {
+        const row = $(el as any);
+        const cells = row.find('td');
+        
+        // DexScreener's table structure
+        const pairCell = cells.eq(1);
+        const priceCell = cells.eq(2);
+        const liquidityCell = cells.eq(3);
+        const volumeCell = cells.eq(4);
+        const priceChangeCell = cells.eq(5);
+        const mcapCell = cells.eq(6);
+
+        // Extract pair info
+        const pairLink = pairCell.find('a').first();
+        const href = pairLink.attr('href') || '';
+        const pairAddress = href.split('/').pop() || '';
+        
+        // Name and symbol are within specific divs
+        const nameDiv = pairCell.find('div').first();
+        const symbolDiv = pairCell.find('div').eq(1);
+        
+        const name = nameDiv.text().trim();
+        const symbol = symbolDiv.text().trim();
+
+        // Extract other metrics
+        const priceText = priceCell.text().trim();
+        const liquidityText = liquidityCell.text().trim();
+        const volumeText = volumeCell.text().trim();
+        const priceChangeText = priceChangeCell.text().trim();
+        const mcapText = mcapCell.text().trim();
+
+        logger.debug(`Processing row ${i + 1}: ${name} (${symbol})`);
+        
+        coins.push({
+          pairAddress,
+          name: name || 'Unknown',
+          symbol: symbol || '—',
+          priceUsd: parseNumber(priceText),
+          liquidity: parseNumber(liquidityText),
+          marketCap: parseNumber(mcapText),
+          volume24h: parseNumber(volumeText),
+          priceChange24h: parseNumber(priceChangeText),
+          dexscreenerUrl: href ? new URL(href, 'https://dexscreener.com').toString() : '',
+          timestamp: new Date().toISOString(),
+        });
+      } catch (err) {
+        logger.error(`Error processing row ${i + 1}`, { error: (err as Error).message });
+      }
+    });
+  }
+
+  logger.info(`Successfully scraped ${coins.length} coins`);
+  return coins;
+}

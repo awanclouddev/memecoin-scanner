@@ -105,7 +105,7 @@ export function parseNumber(text: string): number {
 }
 
 // Normalize various coin-like objects into Coin[] with numeric fields
-function normalizeCoins(items: any[]): Coin[] {
+export function normalizeCoins(items: any[]): Coin[] {
   return (items || []).map((c: any) => {
     const pairAddress = (c.pairAddress || c.address || c.id || '') + '';
     const name = (c.name || c.tokenName || c.title || c.baseTokenName || '') + '';

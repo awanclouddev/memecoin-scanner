@@ -46,3 +46,6 @@ writeFileSync(
 );
 
 console.log('Sample data written to coins.json');
+
+// placeholder script used by package.json:populate-test
+console.log('populate-test-data placeholder');
