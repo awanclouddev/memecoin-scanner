@@ -18,8 +18,6 @@ async function initPuppeteer() {
   return puppeteer;
 }
 
-const TARGET_URL = 'https://dexscreener.com/solana?rankBy=trendingScoreM5&order=desc&minLiq=10000&minMarketCap=10000&maxMarketCap=250000&min24HVol=50000&profile=1';
-
 const USER_AGENTS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Safari/605.1.15',
@@ -134,7 +132,8 @@ export function normalizeCoins(items: any[]): Coin[] {
   });
 }
 
-async function getPageContent(): Promise<string | Coin[]> {
+async function getPageContent(url?: string): Promise<string | Coin[]> {
+  const targetUrl = url || process.env.TARGET_URL || 'https://dexscreener.com/solana';
   let browser: Browser | null = null;
   
   try {
@@ -215,7 +214,7 @@ async function getPageContent(): Promise<string | Coin[]> {
     
     // Then navigate to target URL
     logger.info('Navigating to target URL');
-    await page.goto(TARGET_URL, { 
+    await page.goto(targetUrl, { 
       waitUntil: 'networkidle0',
       timeout: 60000
     });
@@ -237,28 +236,49 @@ async function getPageContent(): Promise<string | Coin[]> {
 
     // Try to extract data directly using JavaScript
     let jsData: Coin[] = await page.evaluate(() => {
-      const rows = Array.from(document.querySelectorAll('.table-wrap tr, [data-testid="pair-table"] tr, .token-list > div'));
+      const rows = Array.from(document.querySelectorAll('a.ds-dex-table-row'));
       const now = new Date().toISOString();
       
       return rows
         .map(row => {
-          const cells = Array.from(row.querySelectorAll('td, div[role="cell"]'));
-          if (cells.length < 8) return null;
-
-          // Extract pair address and URL
-          const link = row.querySelector('a')?.href || '';
-          const pairAddress = link.split('/').pop() || '';
+          const href = (row as HTMLAnchorElement).href || '';
+          const pairAddress = href.split('/').pop() || '';
+          
+          // Extract token info
+          const tokenCol = row.querySelector('.ds-dex-table-row-col-token');
+          const symbol = tokenCol?.querySelector('.ds-dex-table-row-base-token-symbol')?.textContent?.trim() || '';
+          const name = tokenCol?.querySelector('.ds-dex-table-row-base-token-name-text')?.textContent?.trim() || '';
+          
+          // Extract price
+          const priceText = row.querySelector('.ds-dex-table-row-col-price')?.textContent?.trim() || '';
+          const priceUsd = parseFloat(priceText.replace(/[$,]/g, '') || '0');
+          
+          // Extract 24h change
+          const changeText = row.querySelector('.ds-change-perc')?.textContent?.trim() || '';
+          const priceChange24h = parseFloat(changeText.replace('%', '') || '0');
+          
+          // Extract liquidity
+          const liquidityText = row.querySelector('.ds-dex-table-row-col-liquidity')?.textContent?.trim() || '';
+          const liquidity = parseFloat(liquidityText.replace(/[$,]/g, '') || '0');
+          
+          // Extract market cap
+          const marketCapText = row.querySelector('.ds-dex-table-row-col-market-cap')?.textContent?.trim() || '';
+          const marketCap = parseFloat(marketCapText.replace(/[$,]/g, '') || '0');
+          
+          // Extract volume (if available)
+          const volumeText = row.querySelector('.ds-dex-table-row-col-volume, .ds-dex-table-row-col-24h-volume')?.textContent?.trim() || '';
+          const volume24h = parseFloat(volumeText.replace(/[$,]/g, '') || '0');
           
           return {
             pairAddress,
-            symbol: cells[1]?.textContent?.trim() || '',
-            name: cells[2]?.textContent?.trim() || '',
-            priceUsd: parseFloat((cells[3]?.textContent?.replace(/[$,]/g, '') || '0')),
-            marketCap: parseFloat((cells[4]?.textContent?.replace(/[$,]/g, '') || '0')),
-            liquidity: parseFloat((cells[5]?.textContent?.replace(/[$,]/g, '') || '0')),
-            volume24h: parseFloat((cells[6]?.textContent?.replace(/[$,]/g, '') || '0')),
-            priceChange24h: parseFloat((cells[7]?.textContent?.replace(/[%,]/g, '') || '0')),
-            dexscreenerUrl: link,
+            symbol,
+            name,
+            priceUsd,
+            marketCap,
+            liquidity,
+            volume24h,
+            priceChange24h,
+            dexscreenerUrl: href,
             timestamp: now
           };
         })
@@ -298,41 +318,52 @@ async function getPageContent(): Promise<string | Coin[]> {
 
           // re-evaluate js extraction after waiting for content
           const retryData: Coin[] = await page.evaluate(() => {
-            const rows = Array.from(document.querySelectorAll('.table-wrap tr, [data-testid="pair-table"] tr, .token-list > div, a.ds-dex-table-row'));
+            const rows = Array.from(document.querySelectorAll('a.ds-dex-table-row'));
             const now = new Date().toISOString();
             return rows
               .map(row => {
-                const cells = Array.from((row as HTMLElement).querySelectorAll('td, div[role="cell"]'));
-                // try anchor-based fallback by reading text if cells are missing
-                if (cells.length < 4) {
-                  // for anchor rows, attempt to parse token columns
-                  const anchor = (row as HTMLElement).querySelector('a');
-                  const text = (row as HTMLElement).innerText || '';
-                  if (!text) return null;
-                  // best-effort split (not perfect)
-                  const parts = text.split('\n').map(p => p.trim()).filter(Boolean);
-                  const symbol = parts[0] || '';
-                  const name = parts[1] || '';
-                  return symbol ? { pairAddress: '', symbol, name, priceUsd: 0, marketCap: 0, liquidity: 0, volume24h: 0, priceChange24h: 0, dexscreenerUrl: anchor?.getAttribute('href') || '', timestamp: now } : null;
-                }
-
-                if (cells.length < 8) return null;
-                const link = (row as HTMLElement).querySelector('a')?.getAttribute('href') || '';
-                const pairAddress = link.split('/').pop() || '';
+                const href = (row as HTMLAnchorElement).href || '';
+                const pairAddress = href.split('/').pop() || '';
+                
+                // Extract token info
+                const tokenCol = row.querySelector('.ds-dex-table-row-col-token');
+                const symbol = tokenCol?.querySelector('.ds-dex-table-row-base-token-symbol')?.textContent?.trim() || '';
+                const name = tokenCol?.querySelector('.ds-dex-table-row-base-token-name-text')?.textContent?.trim() || '';
+                
+                // Extract price
+                const priceText = row.querySelector('.ds-dex-table-row-col-price')?.textContent?.trim() || '';
+                const priceUsd = parseFloat(priceText.replace(/[$,]/g, '') || '0');
+                
+                // Extract 24h change
+                const changeText = row.querySelector('.ds-change-perc')?.textContent?.trim() || '';
+                const priceChange24h = parseFloat(changeText.replace('%', '') || '0');
+                
+                // Extract liquidity
+                const liquidityText = row.querySelector('.ds-dex-table-row-col-liquidity')?.textContent?.trim() || '';
+                const liquidity = parseFloat(liquidityText.replace(/[$,]/g, '') || '0');
+                
+                // Extract market cap
+                const marketCapText = row.querySelector('.ds-dex-table-row-col-market-cap')?.textContent?.trim() || '';
+                const marketCap = parseFloat(marketCapText.replace(/[$,]/g, '') || '0');
+                
+                // Extract volume (if available)
+                const volumeText = row.querySelector('.ds-dex-table-row-col-volume, .ds-dex-table-row-col-24h-volume')?.textContent?.trim() || '';
+                const volume24h = parseFloat(volumeText.replace(/[$,]/g, '') || '0');
+                
                 return {
                   pairAddress,
-                  symbol: (cells[1]?.textContent || '').trim(),
-                  name: (cells[2]?.textContent || '').trim(),
-                  priceUsd: parseFloat(((cells[3]?.textContent || '').replace(/[$,]/g, '') || '0')),
-                  marketCap: parseFloat(((cells[4]?.textContent || '').replace(/[$,]/g, '') || '0')),
-                  liquidity: parseFloat(((cells[5]?.textContent || '').replace(/[$,]/g, '') || '0')),
-                  volume24h: parseFloat(((cells[6]?.textContent || '').replace(/[$,]/g, '') || '0')),
-                  priceChange24h: parseFloat(((cells[7]?.textContent || '').replace(/[%,]/g, '') || '0')),
-                  dexscreenerUrl: link,
+                  symbol,
+                  name,
+                  priceUsd,
+                  marketCap,
+                  liquidity,
+                  volume24h,
+                  priceChange24h,
+                  dexscreenerUrl: href,
                   timestamp: now
                 };
               })
-              .filter(item => item && (item as any).symbol) as any[];
+              .filter(item => item && item.symbol) as any[];
           });
 
           logger.info(`Retry JS-extracted ${retryData.length} coins on attempt ${cfAttempt}`);
@@ -669,27 +700,69 @@ function extractCoinData($: any): Coin[] {
   return coins;
 }
 
+async function scrapeWithPagination(): Promise<Coin[]> {
+  const baseUrl = process.env.TARGET_URL || 'https://dexscreener.com/solana';
+  const allCoins: Coin[] = [];
+
+  // Scrape first page
+  logger.info('Scraping page 1');
+  const firstPageResult = await retry(() => getPageContent(baseUrl), 3, 5000);
+
+  if (Array.isArray(firstPageResult)) {
+    allCoins.push(...firstPageResult);
+    logger.info(`Page 1: Found ${firstPageResult.length} coins`);
+  } else {
+    // If first page fails, return empty array or try fallback
+    logger.warn('First page scrape failed or returned HTML, trying fallback');
+    return [];
+  }
+
+  // Check for pagination and scrape additional pages
+  let pageNum = 2;
+  const maxPages = parseInt(process.env.MAX_SCRAPE_PAGES || '5', 10);
+
+  while (pageNum <= maxPages) {
+    try {
+      // Generate next page URL based on the pattern provided
+      const nextPageUrl = baseUrl.replace('/solana?', `/solana/page-${pageNum}?`);
+
+      logger.info(`Scraping page ${pageNum}: ${nextPageUrl}`);
+      const pageResult = await retry(() => getPageContent(nextPageUrl), 3, 5000);
+
+      if (Array.isArray(pageResult) && pageResult.length > 0) {
+        allCoins.push(...pageResult);
+        logger.info(`Page ${pageNum}: Found ${pageResult.length} coins (total: ${allCoins.length})`);
+        pageNum++;
+      } else {
+        // No more pages or empty page
+        logger.info(`Page ${pageNum}: No more data found, stopping pagination`);
+        break;
+      }
+    } catch (error) {
+      logger.info(`Page ${pageNum}: Failed to scrape, stopping pagination`, error);
+      break;
+    }
+  }
+
+  // Remove duplicates based on pairAddress
+  const seen = new Set<string>();
+  const deduped = allCoins.filter(coin => {
+    if (!coin.pairAddress || seen.has(coin.pairAddress)) {
+      return false;
+    }
+    seen.add(coin.pairAddress);
+    return true;
+  });
+
+  logger.info(`Pagination complete: ${allCoins.length} total coins, ${deduped.length} unique coins`);
+  return deduped;
+}
+
 export async function scrapeDexscreener(): Promise<Coin[]> {
   logger.info('Starting Dexscreener scrape');
   
   try {
-    const result = await retry(() => getPageContent(), 3, 5000);
-    
-    if (Array.isArray(result)) {
-      return result;
-    }
-    
-    const $ = cheerio.load(result as string);
-    const coins = extractCoinData($);
-    // persist parsed coins for debugging
-    try {
-      await fs.mkdir(path.join(process.cwd(), 'data'), { recursive: true });
-      await fs.writeFile(path.join(process.cwd(), 'data', 'debug-parsed-coins.json'), JSON.stringify(coins, null, 2), 'utf-8');
-    } catch (e) {
-      logger.error('Failed to write debug-parsed-coins.json', e);
-    }
-    logger.info(`Scraped ${coins.length} coins`);
-    return coins;
+    return await scrapeWithPagination();
   } catch (error: unknown) {
     logger.error('Failed to scrape Dexscreener:', error);
     try {

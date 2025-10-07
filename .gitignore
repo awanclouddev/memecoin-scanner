@@ -48,4 +48,6 @@ debug-screenshot.png
 next-env.d.ts
 
 # Keep data directory but ignore debug artifacts only
+data/*.bak.*
+data/coins.json.bak.*
 !data/
