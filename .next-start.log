@@ -1,0 +1,20 @@
+
+> memecoin-scanner@0.1.0 start
+> next start
+
+   ▲ Next.js 15.5.4
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.1.78:3000
+
+ ✓ Starting...
+ ✓ Ready in 364ms
+info: Starting Dexscreener scrape {"service":"memecoin-scanner","timestamp":"2025-10-06T08:44:02.801Z"}
+info: Launching browser {"service":"memecoin-scanner","timestamp":"2025-10-06T08:44:02.806Z"}
+info: Navigating to homepage {"service":"memecoin-scanner","timestamp":"2025-10-06T08:44:05.284Z"}
+info: Navigating to target URL {"service":"memecoin-scanner","timestamp":"2025-10-06T08:44:14.806Z"}
+info: Simulating human behavior {"service":"memecoin-scanner","timestamp":"2025-10-06T08:44:17.266Z"}
+info: JS-extracted 0 coins {"service":"memecoin-scanner","timestamp":"2025-10-06T08:44:23.988Z"}
+info: Page content length: 1173757 bytes {"service":"memecoin-scanner","timestamp":"2025-10-06T08:44:24.235Z"}
+info: Trying to find coin data (anchor-based rows first) {"service":"memecoin-scanner","timestamp":"2025-10-06T08:44:24.524Z"}
+info: Found 100 coins using anchor selector {"service":"memecoin-scanner","timestamp":"2025-10-06T08:44:24.563Z"}
+info: Scraped 100 coins {"service":"memecoin-scanner","timestamp":"2025-10-06T08:44:24.565Z"}

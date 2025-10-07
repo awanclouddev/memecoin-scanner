@@ -1,11 +1,6 @@
 'use client'
 
-import dynamic from 'next/dynamic'
-
-const CoinList = dynamic(() => import('./components/CoinList'), {
-  ssr: false,
-  loading: () => <p>Loading...</p>
-})
+import CoinList from './components/CoinList'
 
 export default function Home() {
   return (

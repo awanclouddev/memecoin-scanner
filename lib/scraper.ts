@@ -163,10 +163,17 @@ async function getPageContent(): Promise<string | Coin[]> {
       launchArgs.push(`--proxy-server=${proxy}`);
     }
 
-    browser = await puppeteer.launch({
-      args: launchArgs,
-      headless: headless
-    });
+    const remoteWs = process.env.REMOTE_CHROME_WS || process.env.REMOTE_CHROME || '';
+    if (remoteWs) {
+      logger.info(`Connecting to remote Chrome at ${remoteWs}`);
+      // puppeteer here is puppeteer-extra which exports connect as well
+      browser = await puppeteer.connect({ browserWSEndpoint: remoteWs });
+    } else {
+      browser = await puppeteer.launch({
+        args: launchArgs,
+        headless: headless
+      });
+    }
 
     const page = await browser!.newPage();
     await page.setUserAgent(userAgent);
@@ -217,19 +224,19 @@ async function getPageContent(): Promise<string | Coin[]> {
     await simulateHumanBehavior(page);
     
     // Check for Cloudflare or other bot detection
-    const cloudflareDetected = await page.evaluate(() => {
+    let cloudflareDetected = await page.evaluate(() => {
       return document.body.textContent?.includes('Cloudflare') || false;
     });
-    
+
     if (cloudflareDetected) {
-      logger.info('Cloudflare detected, waiting longer');
-      await sleep(10000);
+      logger.info('Cloudflare detected, entering mitigation loop');
     }
 
+    // initial wait
     await sleep(5000);
-    
+
     // Try to extract data directly using JavaScript
-    const jsData: Coin[] = await page.evaluate(() => {
+    let jsData: Coin[] = await page.evaluate(() => {
       const rows = Array.from(document.querySelectorAll('.table-wrap tr, [data-testid="pair-table"] tr, .token-list > div'));
       const now = new Date().toISOString();
       
@@ -258,6 +265,91 @@ async function getPageContent(): Promise<string | Coin[]> {
         .filter(item => item && item.symbol) as any[];
     });
     logger.info(`JS-extracted ${jsData.length} coins`);
+
+    // If no JS data and Cloudflare was present, attempt a few reloads + human simulation
+    if (jsData.length === 0 && cloudflareDetected) {
+      // default to more attempts when Cloudflare is detected; allow override via env
+      const maxCfRetries = Math.max(1, parseInt(process.env.CF_RETRY_ATTEMPTS || '6', 10));
+      logger.info(`Cloudflare mitigation engaged (max attempts: ${maxCfRetries})`);
+      for (let cfAttempt = 1; cfAttempt <= maxCfRetries; cfAttempt++) {
+        try {
+          const waitMs = 4000 * cfAttempt;
+          logger.info(`Cloudflare mitigation attempt ${cfAttempt}, sleeping ${waitMs}ms before action`);
+          await sleep(waitMs);
+          await simulateHumanBehavior(page);
+
+          // Try to reload the page and then wait specifically for the anchor rows that indicate content
+          try {
+            await page.reload({ waitUntil: 'networkidle0', timeout: 60000 });
+          } catch (e) {
+            logger.info('Reload failed during CF mitigation', e as any);
+          }
+
+          // Give the page some time and wait for the anchor rows that usually contain the pair list
+          try {
+            const selector = 'a.ds-dex-table-row, [data-testid="pair-table"] a, .table-wrap a';
+            logger.info(`Waiting for selector ${selector} (attempt ${cfAttempt})`);
+            await page.waitForSelector(selector, { timeout: 10000 });
+          } catch (e) {
+            logger.info('Selector wait did not succeed, will retry if attempts remain');
+          }
+
+          await sleep(1500);
+
+          // re-evaluate js extraction after waiting for content
+          const retryData: Coin[] = await page.evaluate(() => {
+            const rows = Array.from(document.querySelectorAll('.table-wrap tr, [data-testid="pair-table"] tr, .token-list > div, a.ds-dex-table-row'));
+            const now = new Date().toISOString();
+            return rows
+              .map(row => {
+                const cells = Array.from((row as HTMLElement).querySelectorAll('td, div[role="cell"]'));
+                // try anchor-based fallback by reading text if cells are missing
+                if (cells.length < 4) {
+                  // for anchor rows, attempt to parse token columns
+                  const anchor = (row as HTMLElement).querySelector('a');
+                  const text = (row as HTMLElement).innerText || '';
+                  if (!text) return null;
+                  // best-effort split (not perfect)
+                  const parts = text.split('\n').map(p => p.trim()).filter(Boolean);
+                  const symbol = parts[0] || '';
+                  const name = parts[1] || '';
+                  return symbol ? { pairAddress: '', symbol, name, priceUsd: 0, marketCap: 0, liquidity: 0, volume24h: 0, priceChange24h: 0, dexscreenerUrl: anchor?.getAttribute('href') || '', timestamp: now } : null;
+                }
+
+                if (cells.length < 8) return null;
+                const link = (row as HTMLElement).querySelector('a')?.getAttribute('href') || '';
+                const pairAddress = link.split('/').pop() || '';
+                return {
+                  pairAddress,
+                  symbol: (cells[1]?.textContent || '').trim(),
+                  name: (cells[2]?.textContent || '').trim(),
+                  priceUsd: parseFloat(((cells[3]?.textContent || '').replace(/[$,]/g, '') || '0')),
+                  marketCap: parseFloat(((cells[4]?.textContent || '').replace(/[$,]/g, '') || '0')),
+                  liquidity: parseFloat(((cells[5]?.textContent || '').replace(/[$,]/g, '') || '0')),
+                  volume24h: parseFloat(((cells[6]?.textContent || '').replace(/[$,]/g, '') || '0')),
+                  priceChange24h: parseFloat(((cells[7]?.textContent || '').replace(/[%,]/g, '') || '0')),
+                  dexscreenerUrl: link,
+                  timestamp: now
+                };
+              })
+              .filter(item => item && (item as any).symbol) as any[];
+          });
+
+          logger.info(`Retry JS-extracted ${retryData.length} coins on attempt ${cfAttempt}`);
+          if (retryData.length > 0) {
+            jsData = retryData;
+            cloudflareDetected = false;
+            break;
+          }
+        } catch (e) {
+          logger.info('Error during Cloudflare mitigation attempt', e as any);
+        }
+      }
+
+      if (jsData.length === 0) {
+        logger.info('Cloudflare mitigation exhausted without finding coin rows');
+      }
+    }
 
     if (jsData.length > 0) {
       // Normalize numeric fields and persist both raw and normalized data + artifacts

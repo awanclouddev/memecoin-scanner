@@ -8,9 +8,7 @@ const nextConfig: NextConfig = {
     }
     return config;
   },
-  experimental: {
-    serverActions: true
-  },
+  // experimental: { serverActions: true }, // removed to satisfy Next.js type checks
 };
 
 export default nextConfig;

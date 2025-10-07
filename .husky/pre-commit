@@ -1,0 +1,10 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+# Prevent accidental commits that include modifications to data/coins.json
+if git diff --cached --name-only | grep -q "^data/coins.json$"; then
+  echo "\nERROR: data/coins.json is staged for commit. This file is canonical and managed by scrapers.\nPlease unstage it (git restore --staged data/coins.json) or revert your changes.\n"
+  exit 1
+fi
+
+exit 0

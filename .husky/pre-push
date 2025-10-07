@@ -1,0 +1,20 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+# Prevent pushing commits that modify data/coins.json
+echo "Checking for accidental changes to data/coins.json..."
+
+# Determine range to inspect: prefer origin/HEAD..HEAD, fallback to HEAD~5..HEAD
+RANGE=""
+if git rev-parse --verify origin/HEAD >/dev/null 2>&1; then
+  RANGE="origin/HEAD..HEAD"
+else
+  RANGE="HEAD~5..HEAD"
+fi
+
+if git diff --name-only $RANGE | grep -q "^data/coins.json$"; then
+  echo "\nERROR: Your push includes changes to data/coins.json. This file is canonical and should not be pushed.\nPlease revert or remove the change from commits before pushing."
+  exit 1
+fi
+
+exit 0

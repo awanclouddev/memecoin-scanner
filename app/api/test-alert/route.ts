@@ -3,9 +3,11 @@ import { sendAlert } from '../../../lib/alerter';
 
 export async function GET() {
   try {
-    await sendAlert('Test Alert from Memecoin Scanner', 'This is a test alert triggered via /api/test-alert');
-    return NextResponse.json({ status: 'ok', message: 'Test alert sent' });
+    const res = await sendAlert('Test Alert from Memecoin Scanner', 'This is a test alert triggered via /api/test-alert');
+    console.log('Test alert response:', res);
+    return NextResponse.json({ status: 'ok', message: 'Test alert sent', webhookResponse: res });
   } catch (e) {
-    return NextResponse.json({ status: 'error', message: 'Failed to send test alert' }, { status: 500 });
+    console.error('Test alert failed', e);
+    return NextResponse.json({ status: 'error', message: 'Failed to send test alert', error: String(e) }, { status: 500 });
   }
 }
